@@ -1,0 +1,82 @@
+name: PR Auto Comments
+
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  comment_on_review:
+    if: github.event_name == 'pull_request_review'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post comment on review state
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const review = context.payload.review;
+
+            // Guards
+            if (!pr || !review) {
+              core.info('Missing PR or review payload; exiting.');
+              return;
+            }
+
+            const prAuthor = pr.user.login;
+            const reviewer = review.user.login;
+            const state = (review.state || '').toLowerCase(); // approved | changes_requested | commented | dismissed
+
+            let body;
+            if (state === 'approved') {
+              body = `@${prAuthor} — ✅ @${reviewer} approved this pull request.`;
+            } else if (state === 'changes_requested') {
+              body = `@${prAuthor} — ⚠️ @${reviewer} requested changes.`;
+            } else if (state === 'commented') {
+              body = `@${prAuthor} — 💬 @${reviewer} left review comments.`;
+            } else if (state === 'dismissed') {
+              body = `@${prAuthor} — ❌ A review by @${reviewer} was dismissed.`;
+            } else {
+              core.info(`Unhandled review state: ${state}`);
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body
+            });
+
+  comment_on_close:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post comment on PR close/merge
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.info('No PR payload; exiting.');
+              return;
+            }
+
+            const prAuthor = pr.user.login;
+            const actor = context.actor;
+            const body = pr.merged
+              ? `@${prAuthor} — 🎉 This PR was merged by @${actor}.`
+              : `@${prAuthor} — 🚫 This PR was closed without merge by @${actor}.`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body
+            });
